@@ -1,5 +1,6 @@
-/* MPI recursive merge sort
+/* MPI recursive merge sort (com bubblesort como caso base)
    Copyright (C) 2011  Atanas Radenski
+   Modificado para usar bubblesort como ordenação base.
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License as
@@ -19,7 +20,7 @@
 */
 
 /* IMPORTANT: Compile with -lm:
-   mpicc mpi_mergesort.c -lm -o mpi_mergesort */
+   mpicc mpi_mergesort.c -lm -o mpi_mergeesort */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -27,19 +28,20 @@
 #include <math.h>
 #include <mpi.h>
 
-// Arrays size <= SMALL switches to insertion sort
-#define SMALL    32
+// Arrays size <= SMALL switches to insertion sort 
+#define SMALL    32 
 
 extern double get_time (void);
 void merge (int a[], int size, int temp[]);
-void insertion_sort (int a[], int size);
-void mergesort_serial (int a[], int size, int temp[]);
+
+void bubblesort(int a[], int size); 
+
 void mergesort_parallel_mpi (int a[], int size, int temp[],
-			     int level, int my_rank, int max_rank,
-			     int tag, MPI_Comm comm);
+           int level, int my_rank, int max_rank,
+           int tag, MPI_Comm comm);
 int my_topmost_level_mpi (int my_rank);
 void run_root_mpi (int a[], int size, int temp[], int max_rank, int tag,
-		   MPI_Comm comm);
+       MPI_Comm comm);
 void run_helper_mpi (int my_rank, int max_rank, int tag, MPI_Comm comm);
 int main (int argc, char *argv[]);
 
@@ -58,51 +60,51 @@ main (int argc, char *argv[])
   int tag = 123;
   // Set test data
   if (my_rank == 0)
-    {				// Only root process sets test data 
-      puts ("-MPI Recursive Mergesort-\t");
+    {       // Only root process sets test data 
+      puts ("-MPI Recursive Mergesort (com Bubblesort base)-\t"); // Título atualizado
       // Check arguments
-      if (argc != 2)		/* argc must be 2 for proper execution! */
-	{
-	  printf ("Usage: %s array-size\n", argv[0]);
-	  MPI_Abort (MPI_COMM_WORLD, 1);
-	}
+      if (argc != 2)    /* argc must be 2 for proper execution! */
+  {
+    printf ("Usage: %s array-size\n", argv[0]);
+    MPI_Abort (MPI_COMM_WORLD, 1);
+  }
       // Get argument
-      int size = atoi (argv[1]);	// Array size
+      int size = atoi (argv[1]);  // Array size
       printf ("Array size = %d\nProcesses = %d\n", size, comm_size);
       // Array allocation
       int *a = malloc (sizeof (int) * size);
-      int *temp = malloc (sizeof (int) * size);
+      int *temp = malloc (sizeof (int) * size); // temp ainda é necessário para o merge paralelo
       if (a == NULL || temp == NULL)
-	{
-	  printf ("Error: Could not allocate array of size %d\n", size);
-	  MPI_Abort (MPI_COMM_WORLD, 1);
-	}
+  {
+    printf ("Error: Could not allocate array of size %d\n", size);
+    MPI_Abort (MPI_COMM_WORLD, 1);
+  }
       // Random array initialization
       srand (314159);
       int i;
       for (i = 0; i < size; i++)
-	{
-	  a[i] = rand () % size;
-	}
+  {
+    a[i] = rand () % size;
+  }
       // Sort with root process
       double start = get_time ();
       run_root_mpi (a, size, temp, max_rank, tag, MPI_COMM_WORLD);
       double end = get_time ();
       printf ("Start = %.2f\nEnd = %.2f\nElapsed = %.2f\n",
-	      start, end, end - start);
+        start, end, end - start);
       // Result check
       for (i = 1; i < size; i++)
-	{
-	  if (!(a[i - 1] <= a[i]))
-	    {
-	      printf ("Implementation error: a[%d]=%d > a[%d]=%d\n", i - 1,
-		      a[i - 1], i, a[i]);
-	      MPI_Abort (MPI_COMM_WORLD, 1);
-	    }
-	}
-    }				// Root process end
+  {
+    if (!(a[i - 1] <= a[i]))
+      {
+        printf ("Implementation error: a[%d]=%d > a[%d]=%d\n", i - 1,
+          a[i - 1], i, a[i]);
+        MPI_Abort (MPI_COMM_WORLD, 1);
+      }
+  }
+    }       // Root process end
   else
-    {				// Helper processes  
+    {       // Helper processes  
       run_helper_mpi (my_rank, max_rank, tag, MPI_COMM_WORLD);
     }
   fflush (stdout);
@@ -113,15 +115,15 @@ main (int argc, char *argv[])
 // Root process code
 void
 run_root_mpi (int a[], int size, int temp[], int max_rank, int tag,
-	      MPI_Comm comm)
+        MPI_Comm comm)
 {
   int my_rank;
   MPI_Comm_rank (comm, &my_rank);
   if (my_rank != 0)
     {
       printf
-	("Error: run_root_mpi called from process %d; must be called from process 0 only\n",
-	 my_rank);
+  ("Error: run_root_mpi called from process %d; must be called from process 0 only\n",
+   my_rank);
       MPI_Abort (MPI_COMM_WORLD, 1);
     }
   mergesort_parallel_mpi (a, size, temp, 0, my_rank, max_rank, tag, comm);
@@ -142,7 +144,7 @@ run_helper_mpi (int my_rank, int max_rank, int tag, MPI_Comm comm)
   int parent_rank = status.MPI_SOURCE;
   // allocate int a[size], temp[size] 
   int *a = malloc (sizeof (int) * size);
-  int *temp = malloc (sizeof (int) * size);
+  int *temp = malloc (sizeof (int) * size); 
   MPI_Recv (a, size, MPI_INT, parent_rank, tag, comm, &status);
   mergesort_parallel_mpi (a, size, temp, level, my_rank, max_rank, tag, comm);
   // Send sorted array to parent process
@@ -164,13 +166,16 @@ my_topmost_level_mpi (int my_rank)
 // MPI merge sort
 void
 mergesort_parallel_mpi (int a[], int size, int temp[],
-			int level, int my_rank, int max_rank,
-			int tag, MPI_Comm comm)
+      int level, int my_rank, int max_rank,
+      int tag, MPI_Comm comm)
 {
   int helper_rank = my_rank + pow (2, level);
   if (helper_rank > max_rank)
-    {				// no more processes available
-      mergesort_serial (a, size, temp);
+    {       // no more processes available
+      
+      // Caso base agora usa bubblesort. O array temp não é necessário para ele.
+      // mergesort_serial (a, size, temp); // <--- Linha antiga
+      bubblesort(a, size); // <--- Nova linha
     }
   else
     {
@@ -179,21 +184,39 @@ mergesort_parallel_mpi (int a[], int size, int temp[],
       MPI_Status status;
       // Send second half, asynchronous
       MPI_Isend (a + size / 2, size - size / 2, MPI_INT, helper_rank, tag,
-		 comm, &request);
+     comm, &request);
       // Sort first half
       mergesort_parallel_mpi (a, size / 2, temp, level + 1, my_rank, max_rank,
-			      tag, comm);
+            tag, comm);
       // Free the async request (matching receive will complete the transfer).
       MPI_Request_free (&request);
       // Receive second half sorted
       MPI_Recv (a + size / 2, size - size / 2, MPI_INT, helper_rank, tag,
-		comm, &status);
+    comm, &status);
       // Merge the two sorted sub-arrays through temp
       merge (a, size, temp);
     }
   return;
 }
 
+// Implementação padrão do Bubblesort
+void
+bubblesort(int a[], int size) 
+{
+    int i, j, temp_swap;
+    for (i = 0; i < size - 1; i++) {
+        for (j = 0; j < size - i - 1; j++) {
+            if (a[j] > a[j + 1]) {
+                // swap
+                temp_swap = a[j];
+                a[j] = a[j + 1];
+                a[j + 1] = temp_swap;
+            }
+        }
+    }
+}
+
+/*
 void
 mergesort_serial (int a[], int size, int temp[])
 {
@@ -208,6 +231,7 @@ mergesort_serial (int a[], int size, int temp[])
   // Merge the two sorted subarrays into a temp array
   merge (a, size, temp);
 }
+*/
 
 void
 merge (int a[], int size, int temp[])
@@ -218,15 +242,15 @@ merge (int a[], int size, int temp[])
   while (i1 < size / 2 && i2 < size)
     {
       if (a[i1] < a[i2])
-	{
-	  temp[tempi] = a[i1];
-	  i1++;
-	}
+  {
+    temp[tempi] = a[i1];
+    i1++;
+  }
       else
-	{
-	  temp[tempi] = a[i2];
-	  i2++;
-	}
+  {
+    temp[tempi] = a[i2];
+    i2++;
+  }
       tempi++;
     }
   while (i1 < size / 2)
@@ -245,6 +269,7 @@ merge (int a[], int size, int temp[])
   memcpy (a, temp, size * sizeof (int));
 }
 
+/*
 void
 insertion_sort (int a[], int size)
 {
@@ -253,11 +278,12 @@ insertion_sort (int a[], int size)
     {
       int j, v = a[i];
       for (j = i - 1; j >= 0; j--)
-	{
-	  if (a[j] <= v)
-	    break;
-	  a[j + 1] = a[j];
-	}
+  {
+    if (a[j] <= v)
+      break;
+    a[j + 1] = a[j];
+  }
       a[j + 1] = v;
     }
 }
+*/
